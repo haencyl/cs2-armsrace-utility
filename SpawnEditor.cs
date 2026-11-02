@@ -87,7 +87,7 @@ public partial class ArmsRaceUtilityPlugin
 
   [ConsoleCommand("css_arspawn", "Arms Race custom spawn editor")]
   [RequiresPermissions("@css/root")]
-  [CommandHelper(minArgs: 0, usage: "add <t|ct> | del <t|ct> [index] | clear <t|ct|all> | list | tp <t|ct> <index> | reload | show <custom|map|all|off> | map | (no args shows help)")]
+  [CommandHelper(minArgs: 0, usage: "add <t|ct> | del <t|ct> [index] | clear <t|ct|all> | list | tp <t|ct> <index> | reload | show <custom|map|all|off> | (no args shows help)")]
   public void OnArSpawnCommand(CCSPlayerController? player, CommandInfo command)
   {
     var started = Stopwatch.GetTimestamp();
@@ -119,14 +119,11 @@ public partial class ArmsRaceUtilityPlugin
       case "reload":
         ReloadSpawns(player);
         break;
-      case "map":
-        ToggleMapSpawnVisualization(player);
-        break;
       case "show":
         ShowSpawnVisualization(player, command);
         break;
       default:
-        Reply(player, $"Unknown subcommand '{subCommand}'. Usage: !arspawn add <t|ct> | del <t|ct> [index] | clear <t|ct|all> | list | tp <t|ct> <index> | reload | show <custom|map|all|off> | map");
+        Reply(player, $"Unknown subcommand '{subCommand}'. Usage: !arspawn add <t|ct> | del <t|ct> [index] | clear <t|ct|all> | list | tp <t|ct> <index> | reload | show <custom|map|all|off>");
         break;
     }
 
@@ -142,7 +139,6 @@ public partial class ArmsRaceUtilityPlugin
     Reply(player, $"{ModuleName} v{ModuleVersion} by {ModuleAuthor}");
     Reply(player, "Options:");
     Reply(player, "  !arspawn show <custom|map|all|off> - choose which spawn markers to display");
-    Reply(player, "  !arspawn map - toggle map spawn markers");
     Reply(player, "  !arspawn add <t|ct> - add a custom spawn at your position");
     Reply(player, "  !arspawn del <t|ct> [index] - delete a custom spawn (nearest if omitted)");
     Reply(player, "  !arspawn clear <t|ct|all> - remove custom spawns");
@@ -659,26 +655,6 @@ public partial class ArmsRaceUtilityPlugin
   #endregion
 
   #region Visualization
-
-  private void ToggleMapSpawnVisualization(CCSPlayerController? player)
-  {
-    if (!_mapSpawnPointsLoaded)
-    {
-      RefreshMapSpawnPoints();
-    }
-
-    _visualizeMapSpawns = !_visualizeMapSpawns;
-    _needsFullRebuild = true;
-    ScheduleSpawnWork();
-
-    if (_visualizeMapSpawns)
-    {
-      Reply(player, $"Map spawn visualization enabled ({_mapSpawnsT.Count} T / {_mapSpawnsCT.Count} CT on {_currentMap}).");
-      return;
-    }
-
-    Reply(player, "Map spawn visualization disabled.");
-  }
 
   private void ShowSpawnVisualization(CCSPlayerController? player, CommandInfo command)
   {
