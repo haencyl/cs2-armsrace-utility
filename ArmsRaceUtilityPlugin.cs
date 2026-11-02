@@ -15,7 +15,7 @@ namespace CS2ArmsRaceUtility;
 public partial class ArmsRaceUtilityPlugin : BasePlugin, IPluginConfig<ArmsRaceUtilityConfig>
 {
   public override string ModuleName => "Arms Race Utility";
-  public override string ModuleVersion => "1.4.0";
+  public override string ModuleVersion => "1.5.0";
   public override string ModuleAuthor => "haencyl";
   public override string ModuleDescription => "Various fun additions for Arms Race";
 

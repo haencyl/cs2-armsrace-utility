@@ -40,6 +40,11 @@ public partial class ArmsRaceUtilityPlugin
   private static readonly Color TerroristColor = Color.FromArgb(255, 238, 158, 47);
   private static readonly Color CounterTerroristColor = Color.FromArgb(255, 115, 201, 227);
 
+  // map spawns use a separate palette so they are easy to tell apart from custom spawns
+  private static readonly Color MapTerroristColor = Color.FromArgb(255, 220, 80, 220);
+  private static readonly Color MapCounterTerroristColor = Color.FromArgb(255, 100, 220, 140);
+  private static readonly Color MapSharedColor = Color.FromArgb(255, 245, 245, 245);
+
   private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
   private MapSpawnFile _mapSpawns = new();
@@ -64,6 +69,7 @@ public partial class ArmsRaceUtilityPlugin
   private readonly List<CBeam> _beams = new();
   private readonly List<CPointWorldText> _labels = new();
   private bool _visualize;
+  private bool _visualizeMapSpawns;
 
   private bool _workScheduled;
   private bool _saveDirty;
@@ -81,7 +87,7 @@ public partial class ArmsRaceUtilityPlugin
 
   [ConsoleCommand("css_arspawn", "Arms Race custom spawn editor")]
   [RequiresPermissions("@css/root")]
-  [CommandHelper(minArgs: 0, usage: "add <t|ct> | del <t|ct> [index] | clear <t|ct|all> | list | tp <t|ct> <index> | reload | (no args toggles visualization)")]
+  [CommandHelper(minArgs: 0, usage: "add <t|ct> | del <t|ct> [index] | clear <t|ct|all> | list | tp <t|ct> <index> | reload | show <custom|map|all|off> | map | (no args shows help)")]
   public void OnArSpawnCommand(CCSPlayerController? player, CommandInfo command)
   {
     var started = Stopwatch.GetTimestamp();
@@ -90,7 +96,7 @@ public partial class ArmsRaceUtilityPlugin
     switch (subCommand)
     {
       case "":
-        ToggleSpawnVisualization(player);
+        ShowSpawnEditorHelp(player);
         break;
       case "add":
         AddSpawn(player, command);
@@ -113,8 +119,14 @@ public partial class ArmsRaceUtilityPlugin
       case "reload":
         ReloadSpawns(player);
         break;
+      case "map":
+        ToggleMapSpawnVisualization(player);
+        break;
+      case "show":
+        ShowSpawnVisualization(player, command);
+        break;
       default:
-        Reply(player, $"Unknown subcommand '{subCommand}'. Usage: !arspawn add <t|ct> | del <t|ct> [index] | clear <t|ct|all> | list | tp <t|ct> <index> | reload");
+        Reply(player, $"Unknown subcommand '{subCommand}'. Usage: !arspawn add <t|ct> | del <t|ct> [index] | clear <t|ct|all> | list | tp <t|ct> <index> | reload | show <custom|map|all|off> | map");
         break;
     }
 
@@ -123,6 +135,20 @@ public partial class ArmsRaceUtilityPlugin
     {
       Logger.LogWarning("css_arspawn '{SubCommand}' blocked the main thread for {Elapsed:F0} ms", subCommand, elapsedMs);
     }
+  }
+
+  private void ShowSpawnEditorHelp(CCSPlayerController? player)
+  {
+    Reply(player, $"{ModuleName} v{ModuleVersion} by {ModuleAuthor}");
+    Reply(player, "Options:");
+    Reply(player, "  !arspawn show <custom|map|all|off> - choose which spawn markers to display");
+    Reply(player, "  !arspawn map - toggle map spawn markers");
+    Reply(player, "  !arspawn add <t|ct> - add a custom spawn at your position");
+    Reply(player, "  !arspawn del <t|ct> [index] - delete a custom spawn (nearest if omitted)");
+    Reply(player, "  !arspawn clear <t|ct|all> - remove custom spawns");
+    Reply(player, "  !arspawn list - list custom and map spawns");
+    Reply(player, "  !arspawn tp <t|ct> <index> - teleport to a custom spawn");
+    Reply(player, "  !arspawn reload - reload custom spawns from disk");
   }
 
   private void AddSpawn(CCSPlayerController? player, CommandInfo command)
@@ -501,6 +527,7 @@ public partial class ArmsRaceUtilityPlugin
 
     if (!Config.UseMapSpawns)
     {
+      ScheduleMapSpawnVisualizationRefresh();
       return;
     }
 
@@ -587,6 +614,19 @@ public partial class ArmsRaceUtilityPlugin
     _mapSpawnsCT.AddRange(armsRaceCT.Count > 0 ? armsRaceCT
       : deathmatch.Count > 0 ? deathmatch
       : competitiveCT);
+
+    ScheduleMapSpawnVisualizationRefresh();
+  }
+
+  private void ScheduleMapSpawnVisualizationRefresh()
+  {
+    if (!_visualizeMapSpawns)
+    {
+      return;
+    }
+
+    _needsFullRebuild = true;
+    ScheduleSpawnWork();
   }
 
   private List<SpawnPointData> GetSpawnList(int team)
@@ -620,45 +660,143 @@ public partial class ArmsRaceUtilityPlugin
 
   #region Visualization
 
-  private void ToggleSpawnVisualization(CCSPlayerController? player)
+  private void ToggleMapSpawnVisualization(CCSPlayerController? player)
   {
-    _visualize = !_visualize;
+    if (!_mapSpawnPointsLoaded)
+    {
+      RefreshMapSpawnPoints();
+    }
+
+    _visualizeMapSpawns = !_visualizeMapSpawns;
     _needsFullRebuild = true;
     ScheduleSpawnWork();
 
-    if (_visualize)
+    if (_visualizeMapSpawns)
     {
-      Reply(player, $"Spawn visualization enabled ({_mapSpawns.T.Count} T / {_mapSpawns.CT.Count} CT on {_currentMap}).");
+      Reply(player, $"Map spawn visualization enabled ({_mapSpawnsT.Count} T / {_mapSpawnsCT.Count} CT on {_currentMap}).");
       return;
     }
 
-    Reply(player, "Spawn visualization disabled.");
+    Reply(player, "Map spawn visualization disabled.");
+  }
+
+  private void ShowSpawnVisualization(CCSPlayerController? player, CommandInfo command)
+  {
+    if (command.ArgCount < 3)
+    {
+      Reply(player,
+        $"Spawn visualization: custom={(_visualize ? "on" : "off")}, map={(_visualizeMapSpawns ? "on" : "off")}. " +
+        "Usage: !arspawn show <custom|map|all|off>");
+      return;
+    }
+
+    switch (command.GetArg(2).ToLowerInvariant())
+    {
+      case "custom":
+      case "spawns":
+        SetSpawnVisualization(player, custom: true, map: false);
+        break;
+      case "map":
+      case "maps":
+      case "official":
+        SetSpawnVisualization(player, custom: false, map: true);
+        break;
+      case "all":
+      case "both":
+        SetSpawnVisualization(player, custom: true, map: true);
+        break;
+      case "off":
+      case "none":
+      case "hide":
+        SetSpawnVisualization(player, custom: false, map: false);
+        break;
+      default:
+        Reply(player, "Usage: !arspawn show <custom|map|all|off>");
+        break;
+    }
+  }
+
+  private void SetSpawnVisualization(CCSPlayerController? player, bool custom, bool map)
+  {
+    if (map && !_mapSpawnPointsLoaded)
+    {
+      RefreshMapSpawnPoints();
+    }
+
+    _visualize = custom;
+    _visualizeMapSpawns = map;
+    _needsFullRebuild = true;
+    ScheduleSpawnWork();
+
+    Reply(player,
+      $"Spawn visualization: custom={(custom ? "on" : "off")} ({_mapSpawns.T.Count} T / {_mapSpawns.CT.Count} CT), " +
+      $"map={(map ? "on" : "off")} ({_mapSpawnsT.Count} T / {_mapSpawnsCT.Count} CT).");
   }
 
   private void RebuildSpawnVisualization()
   {
     ClearSpawnVisualization();
-    if (!_visualize)
+
+    if (_visualize)
     {
-      return;
+      CreateMarkers(_mapSpawns.T, TeamTerrorist, isMapSpawn: false);
+      CreateMarkers(_mapSpawns.CT, TeamCounterTerrorist, isMapSpawn: false);
     }
 
-    CreateMarkers(_mapSpawns.T, TeamTerrorist);
-    CreateMarkers(_mapSpawns.CT, TeamCounterTerrorist);
+    if (_visualizeMapSpawns)
+    {
+      // deathmatch maps use one shared spawn pool for both teams, so avoid drawing each
+      // marker twice at the same position
+      if (SpawnListsMatch(_mapSpawnsT, _mapSpawnsCT))
+      {
+        CreateMarkers(_mapSpawnsT, TeamTerrorist, isMapSpawn: true, sharedMapSpawn: true);
+      }
+      else
+      {
+        CreateMarkers(_mapSpawnsT, TeamTerrorist, isMapSpawn: true);
+        CreateMarkers(_mapSpawnsCT, TeamCounterTerrorist, isMapSpawn: true);
+      }
+    }
   }
 
-  private void CreateMarkers(List<SpawnPointData> spawns, int team)
+  private static bool SpawnListsMatch(List<SpawnPointData> left, List<SpawnPointData> right)
+  {
+    if (left.Count == 0 || left.Count != right.Count)
+    {
+      return false;
+    }
+
+    for (var i = 0; i < left.Count; i++)
+    {
+      if (Math.Abs(left[i].X - right[i].X) > 0.1f ||
+          Math.Abs(left[i].Y - right[i].Y) > 0.1f ||
+          Math.Abs(left[i].Z - right[i].Z) > 0.1f)
+      {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private void CreateMarkers(List<SpawnPointData> spawns, int team, bool isMapSpawn, bool sharedMapSpawn = false)
   {
     for (var i = 0; i < spawns.Count; i++)
     {
-      CreateMarker(spawns[i], team, i + 1);
+      CreateMarker(spawns[i], team, i + 1, isMapSpawn, sharedMapSpawn);
     }
   }
 
-  private void CreateMarker(SpawnPointData spawn, int team, int displayIndex)
+  private void CreateMarker(SpawnPointData spawn, int team, int displayIndex, bool isMapSpawn = false, bool sharedMapSpawn = false)
   {
-    var color = team == TeamTerrorist ? TerroristColor : CounterTerroristColor;
-    var label = TeamLabel(team);
+    var color = sharedMapSpawn
+      ? MapSharedColor
+      : isMapSpawn
+        ? team == TeamTerrorist ? MapTerroristColor : MapCounterTerroristColor
+        : team == TeamTerrorist ? TerroristColor : CounterTerroristColor;
+    var label = sharedMapSpawn
+      ? "MAP"
+      : isMapSpawn ? $"MAP {TeamLabel(team)}" : TeamLabel(team);
 
     var beam = Utilities.CreateEntityByName<CBeam>("beam");
     if (beam != null && beam.IsValid)
@@ -767,11 +905,11 @@ public partial class ArmsRaceUtilityPlugin
     }
 
     var visualizationStarted = Stopwatch.GetTimestamp();
-    if (!_visualize)
+    if (!_visualize && !_visualizeMapSpawns)
     {
       ClearSpawnVisualization();
     }
-    else if (_needsFullRebuild || _pendingMarkerAdd == null)
+    else if (_needsFullRebuild || _pendingMarkerAdd == null || !_visualize)
     {
       RebuildSpawnVisualization();
     }
@@ -807,6 +945,7 @@ public partial class ArmsRaceUtilityPlugin
   {
     ClearSpawnVisualization();
     _visualize = false;
+    _visualizeMapSpawns = false;
     _visualsWarmed = false;
     _needsFullRebuild = false;
     _pendingMarkerAdd = null;
